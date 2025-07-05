@@ -9,7 +9,10 @@ import threading
 import pyttsx3
 import queue
 import time
+import pandas as pd
+import altair as alt
 from utils import PoseAnalyzer, get_pose_landmarks_info
+from firebase_helper import save_workout_to_firebase, get_all_workouts
 
 # ----------------- Streamlit Page Config -----------------
 st.set_page_config(
@@ -41,7 +44,7 @@ initialize_state()
 # ----------------- VideoProcessor Class -----------------
 class VideoProcessor(VideoProcessorBase):
     def __init__(self):
-        initialize_state()  # Ensure session_state is ready
+        initialize_state()
         self.pose_analyzer = st.session_state.pose_analyzer
         self.activity_mode = "Free Pose"
         self.frame_count = 0
@@ -134,7 +137,53 @@ def main():
                         st.session_state.squat_data['count'],
                         st.session_state.squat_data['accuracy']
                     )
-                    st.success("Workout saved successfully!")
+                    save_workout_to_firebase(
+                        reps=st.session_state.squat_data['count'],
+                        accuracy=st.session_state.squat_data['accuracy']
+                    )
+                    st.success("✅ Workout saved locally and to cloud!")
+
+                try:
+                    with open("workout_history.csv", "rb") as file:
+                        st.download_button(
+                            label="📥 Download Workout History (CSV)",
+                            data=file,
+                            file_name="workout_history.csv",
+                            mime="text/csv"
+                        )
+                except FileNotFoundError:
+                    st.warning("No workout history available yet.")
+
+                try:
+                    df = pd.read_csv("workout_history.csv")
+                    if not df.empty:
+                        st.subheader("📊 Workout Progress")
+
+                        reps_chart = alt.Chart(df).mark_line(point=True).encode(
+                            x='date:T',
+                            y='reps:Q',
+                            tooltip=['date', 'reps']
+                        ).properties(title="📈 Reps Over Time")
+
+                        accuracy_chart = alt.Chart(df).mark_line(point=True, color="green").encode(
+                            x='date:T',
+                            y='accuracy:Q',
+                            tooltip=['date', 'accuracy']
+                        ).properties(title="🎯 Accuracy Over Time")
+
+                        st.altair_chart(reps_chart, use_container_width=True)
+                        st.altair_chart(accuracy_chart, use_container_width=True)
+                except Exception as e:
+                    st.warning("⚠️ Could not load workout history.")
+
+                # ☁️ Show Firebase (Cloud) History
+                if st.toggle("🌐 Show Cloud History"):
+                    try:
+                        df_cloud = get_all_workouts()
+                        st.dataframe(df_cloud)
+                        st.success("✅ Synced with Firebase")
+                    except Exception as e:
+                        st.error("❌ Could not load Firebase data")
 
         st.divider()
         st.header("🔍 Diagnostics")
